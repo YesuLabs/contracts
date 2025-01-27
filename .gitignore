@@ -1,0 +1,17 @@
+node_modules
+
+#Hardhat files
+cache
+artifacts
+
+build/
+artifacts-zk/
+
+
+.env
+
+.gitkeep
+
+truffle-config.js
+
+yarn*

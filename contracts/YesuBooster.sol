@@ -31,6 +31,17 @@ contract YesuBooster  is IBeacon {
     event RequestClaim(address _user, address indexed _token, uint256 indexed _amount, uint256 indexed _id);
     event ClaimAssets(address indexed _user, address indexed _token, uint256 indexed _amount, uint256 _id);
 
+    constructor(address _zeroVault, address _agentImpl) {
+
+        zeroVault = IVault(_zeroVault);
+        agentImpl = _agentImpl;
+    }
+
+    /**
+     * @dev Updates the user's information for a specific token.
+     * @param user The address of the user.
+     * @param token The address of the token.
+     */
     function updateUser(address user, address token) internal {
         UserInfo storage info = userInfo[user][token];
         if(info.lastUpdateBlock == 0) {
@@ -44,7 +55,12 @@ contract YesuBooster  is IBeacon {
         info.lastUpdateBlock = stableBlock();
     }
 
-    function stake(address token, uint256 amount) public {
+    /**
+     * @dev Allows a user to stake a specified amount of a token.
+     * @param token The address of the token to stake.
+     * @param amount The amount of the token to stake.
+     */
+    function stake(address token, uint256 amount) external {
         address agent = getAgent(msg.sender);
         
         IERC20(token).safeTransferFrom(msg.sender, agent, amount);
@@ -62,6 +78,11 @@ contract YesuBooster  is IBeacon {
         emit Stake(msg.sender, token, amount);
     }
 
+    /**
+     * @dev Allows a user to request a claim for a specified amount of a token.
+     * @param token The address of the token to claim.
+     * @param amount The amount of the token to claim.
+     */
     function requestClaim(
         address token, 
         uint256 amount
@@ -77,8 +98,11 @@ contract YesuBooster  is IBeacon {
 
         emit RequestClaim(msg.sender, token, amount, requestId);
     }
-
-    function requestClaim(
+    /**
+     * @dev Allows a user to claim their rewards for a specific token.
+     * @param token The address of the token to claim rewards for.
+     */
+    function claim(
         uint256 requestId
     ) external {
         address agent = getAgent(msg.sender);
@@ -93,9 +117,9 @@ contract YesuBooster  is IBeacon {
     }
 
     function getAgent(address user) internal returns (address) {
-        address agent = userAgent[msg.sender];
+        address agent = userAgent[user];
         if(agent == address(0)) {
-            agent = createAgent(msg.sender);
+            agent = createAgent(user);
         }
         return agent;
     }
@@ -104,7 +128,7 @@ contract YesuBooster  is IBeacon {
     function createAgent(address user) internal returns (address) {
         BeaconProxy strategy = new BeaconProxy(address(this), 
                 abi.encodeWithSelector(
-                    bytes4(keccak256(bytes("initialize(address,address,address,uint256)"))),
+                    bytes4(keccak256(bytes("initialize(address,address,address)"))),
                      user, address(zeroVault), address(this))
         );
 

@@ -8,6 +8,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 import "../zero/IVault.sol";
 
+import "hardhat/console.sol";
+
 
 contract StrategyZero  {
 
@@ -20,10 +22,11 @@ contract StrategyZero  {
         _;
     }
 
-    function initialize(address _zeroVault, address _userOwner) public {
+    function initialize(address _userOwner, address _zeroVault, address _factory) public {
         zeroVault = IVault(_zeroVault);
 
         userOwner = _userOwner;
+        factory = _factory;
     }
 
     function stake_66380860(address _token, uint256 _stakedAmount) external onlyFactory {

@@ -9,7 +9,7 @@ const { joinSignature } = require('ethers/utils/bytes')//keccak256,
 
 // const { time } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 
-describe("Lock", function () {
+describe("Vault test", function () {
 
   beforeEach(async () => {
     
@@ -18,9 +18,10 @@ describe("Lock", function () {
 
     users = config.networks.hardhat.accounts;
     const index = 0; // second wallet, increment for next wallets
-    wallet = ethers.Wallet.fromMnemonic(users.mnemonic, users.path + `/${index}`);
+    wallet = await ethers.Wallet.fromMnemonic(users.mnemonic, users.path + `/${index}`);
 
-    console.log(wallet.getAddress()) 
+
+    console.log(await wallet.getAddress()) 
 
       // const ArkSpace = await ethers.getContractFactory('ArkSpace');
       // const MockERC20 = await ethers.getContractFactory('MockERC20');
@@ -41,7 +42,7 @@ describe("Lock", function () {
       // console.log("SPACE:", SPACE.address);
 
     });
-  it("Should set the right unlockTime", async function () {
+  it("Verify test", async function () {
     const lockedAmount = 1_000_000_000;
     const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
     // const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
@@ -55,39 +56,8 @@ describe("Lock", function () {
     // // assert that the value is correct
     // expect(await lock.unlockTime()).to.equal(unlockTime);
 
-    const VAULT = await hre.ethers.deployContract("YesuVault");
+    const VAULT = await hre.ethers.deployContract("YesuVault", [accounts[0].address, accounts[0].address]);
     console.log(VAULT.address)
-
-    await VAULT.setCompleted(1)
-
-    const DOMAIN_SEPARATOR = await VAULT.DOMAIN_SEPARATOR();
-    console.log("DOMAIN", DOMAIN_SEPARATOR)
-    const PERMIT_TYPEHASH =await VAULT.PERMIT_TYPEHASH();// keccak256("Claim(uint256 investId,uint256 amount,address to,uint256 nonce,uint256 deadline)");
-    console.log("PERMIT_TYPEHASH", PERMIT_TYPEHASH.toString('hex'))
-
-    const encodeData = ethers.utils.solidityPack(
-      ['bytes1', 'bytes1', 'bytes32', 'bytes32'],
-      [
-      '0x19',
-      '0x01',
-      DOMAIN_SEPARATOR,
-      keccak256(
-        web3.eth.abi.encodeParameters(
-          ['bytes32','uint256', 'uint256', 'address', 'uint256'],
-        [
-          // [PERMIT_TYPEHASH, approve.owner, approve.spender, approve.value, deadline]
-          PERMIT_TYPEHASH, 1, 2, accounts[0].address, 3
-        ]
-        )
-      )
-    ]);
-    console.log("encodeData.js:", encodeData);
-    const digest = keccak256(
-      encodeData
-    )
-    key = wallet._signingKey().signDigest("0x"+digest.toString('hex'))
-    let sign = joinSignature(key);
-    console.log("sign", sign)
 
 
     const gm = '0x521dE0579d9b20bdbAc4313E2F81181179521b1e';

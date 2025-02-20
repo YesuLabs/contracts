@@ -3,17 +3,22 @@ pragma solidity =0.8.28;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 
-import "./zero/IVault.sol";
-import "./zero/utils.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@aave/core-v3/contracts/interfaces/IPool.sol";
+import "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
 
-contract YesuBooster  is IBeacon {
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract YesuBoosterAave  is  Ownable {
+
     using SafeERC20 for IERC20;
 
-    address public agentImpl;
+    // Aave V3 Pool Addresses Provider
+    IPoolAddressesProvider public immutable ADDRESSES_PROVIDER;
+    IPool public immutable POOL;
 
-    IVault public zeroVault;
 
     mapping(address => address) public userAgent;
     mapping(address => uint256) public tokenTVL;
@@ -27,14 +32,15 @@ contract YesuBooster  is IBeacon {
         uint256 lastUpdateBlock;
     }
 
+    
     event Stake(address indexed _user, address indexed _token, uint256 indexed _amount);
     event RequestClaim(address _user, address indexed _token, uint256 indexed _amount, uint256 indexed _id);
     event ClaimAssets(address indexed _user, address indexed _token, uint256 indexed _amount, uint256 _id);
 
-    constructor(address _zeroVault, address _agentImpl) {
+    constructor(address _addressesProvider) {
 
-        zeroVault = IVault(_zeroVault);
-        agentImpl = _agentImpl;
+        ADDRESSES_PROVIDER = IPoolAddressesProvider(_addressesProvider);
+        POOL = IPool(ADDRESSES_PROVIDER.getPool());
     }
 
     /**
@@ -61,12 +67,23 @@ contract YesuBooster  is IBeacon {
      * @param amount The amount of the token to stake.
      */
     function stake(address token, uint256 amount) external {
-        address agent = getAgent(msg.sender);
         
         IERC20(token).safeTransferFrom(msg.sender, agent, amount);
-        IVault(agent).stake_66380860(token, amount);
 
         updateUser(msg.sender, token);
+
+          // 2. 授权 Aave Pool 使用 USDT
+        IERC20(token).safeIncreaseAllowance(address(POOL), amount);
+
+        // 3. 存入 Aave V3，并获取 aToken
+        POOL.supply(address(token), amount, address(this), 0);
+
+        // 4. 按比例更新用户份额（简化逻辑，实际需计算 aToken 数量）
+        uint256 aTokenBalance = A_USDT.balanceOf(address(this));
+        uint256 shares = (totalShares == 0) ? amount : (amount * totalShares) / (aTokenBalance - amount);
+        
+        userShares[msg.sender] += shares;
+        totalShares += shares;
 
         tokenTVL[token] += amount;
         UserInfo storage info = userInfo[msg.sender][token];

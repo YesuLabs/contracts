@@ -19,8 +19,10 @@ contract YesuVault is Ownable {
   uint public last_completed_migration;
 
   mapping(uint256 => bool) public depositOrder;
+  mapping(uint256 => bool) public withdrawOrder;
 
   event Deposit(uint256 indexed orderId, address indexed user, uint256 amount);
+  event Withdraw(uint256 indexed orderId, address indexed user, uint256 amount);
 
   constructor(address _manager, address _fundsToken)  Ownable(msg.sender) {
 
@@ -40,6 +42,19 @@ contract YesuVault is Ownable {
     depositOrder[orderId] = true;
 
     emit Deposit(orderId, msg.sender, amount);
+  }
+
+  function withdrawWithPermit(uint256 orderId,uint256 amount,address user,uint256 deadline, bytes memory signature) public {
+
+    checkSign(orderId, amount, user, deadline, signature);
+
+    require(!withdrawOrder[orderId], "Order exist");
+
+    fundsToken.safeTransfer(user, amount);
+
+    withdrawOrder[orderId] = true;
+
+    emit Withdraw(orderId, user, amount);
   }
 
   function checkSign(

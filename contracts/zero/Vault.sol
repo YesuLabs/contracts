@@ -8,7 +8,7 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import "./IVault.sol";
 import "./utils.sol";
 
-contract Vault is Pausable, AccessControl, IVault {
+abstract contract Vault is Pausable, AccessControl, IVault {
     using SafeERC20 for IERC20;
 
     mapping(address => uint256) private tvl;
@@ -43,20 +43,20 @@ contract Vault is Pausable, AccessControl, IVault {
     uint256 public WAITING_TIME;
     uint256 private constant BASE = 10_000;
 
-    constructor(
-        // address[] memory _tokens,
-        // uint256[] memory _newRewardRate,
-        // uint256[] memory _minStakeAmount,
-        // uint256[] memory _maxStakeAmount,
-        // address _admin,
-        // address _bot,
-        // address _ceffu,
-        // uint256 _waitingTime
+    // constructor(
+    //     address[] memory _tokens,
+    //     uint256[] memory _newRewardRate,
+    //     uint256[] memory _minStakeAmount,
+    //     uint256[] memory _maxStakeAmount,
+    //     address _admin,
+    //     address _bot,
+    //     address _ceffu,
+    //     uint256 _waitingTime
 
-    // ) {
+    // ) public {
     //     // init(_tokens, _newRewardRate, _minStakeAmount, _maxStakeAmount, _admin, _bot, _ceffu, _waitingTime);
     // }
-    // function init(
+    function init(
     
         address[] memory _tokens,
         uint256[] memory _newRewardRate,

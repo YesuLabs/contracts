@@ -9,38 +9,42 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@aave/core-v3/contracts/interfaces/IPool.sol";
 import "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
-contract YesuBoosterAave  is  Ownable {
+contract YesuBoosterAave  is  OwnableUpgradeable {
 
     using SafeERC20 for IERC20;
 
     // Aave V3 Pool Addresses Provider
-    IPoolAddressesProvider public immutable ADDRESSES_PROVIDER;
-    IPool public immutable POOL;
+    IPoolAddressesProvider public ADDRESSES_PROVIDER;
+    IPool public POOL;
 
 
-    mapping(address => address) public userAgent;
-    mapping(address => uint256) public tokenTVL;
+    mapping(address => uint256) public totalShare;
 
     //  user => { token => usrInfo }
     mapping(address => mapping( address => UserInfo)) public userInfo;
 
     struct UserInfo {
-        uint256 amount; // How many staked tokens the user has provided
+        // uint256 amount; // How many staked tokens the user has provided
         uint256 totalScore; // Reward debt
+        uint256 share; // aave Share
         uint256 lastUpdateBlock;
     }
 
     
     event Stake(address indexed _user, address indexed _token, uint256 indexed _amount);
-    event RequestClaim(address _user, address indexed _token, uint256 indexed _amount, uint256 indexed _id);
-    event ClaimAssets(address indexed _user, address indexed _token, uint256 indexed _amount, uint256 _id);
+    event Withdraw(address indexed _user, address indexed _token, uint256 indexed _amount);
+    function  initialize(address _addressesProvider) public initializer {
 
-    constructor(address _addressesProvider) {
+        __Ownable_init(msg.sender);
 
         ADDRESSES_PROVIDER = IPoolAddressesProvider(_addressesProvider);
         POOL = IPool(ADDRESSES_PROVIDER.getPool());
+    }
+
+    function getProvider() public view returns (address) {
+        return address(ADDRESSES_PROVIDER);
     }
 
     /**
@@ -55,7 +59,7 @@ contract YesuBoosterAave  is  Ownable {
             return;
         }
 
-        uint256 adding =  info.amount * (stableBlock() - info.lastUpdateBlock);
+        uint256 adding =  info.share * (stableBlock() - info.lastUpdateBlock);
         info.totalScore += adding;
 
         info.lastUpdateBlock = stableBlock();
@@ -68,7 +72,7 @@ contract YesuBoosterAave  is  Ownable {
      */
     function stake(address token, uint256 amount) external {
         
-        IERC20(token).safeTransferFrom(msg.sender, agent, amount);
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         updateUser(msg.sender, token);
 
@@ -79,130 +83,96 @@ contract YesuBoosterAave  is  Ownable {
         POOL.supply(address(token), amount, address(this), 0);
 
         // 4. 按比例更新用户份额（简化逻辑，实际需计算 aToken 数量）
-        uint256 aTokenBalance = A_USDT.balanceOf(address(this));
-        uint256 shares = (totalShares == 0) ? amount : (amount * totalShares) / (aTokenBalance - amount);
-        
-        userShares[msg.sender] += shares;
-        totalShares += shares;
+        address A_TOKEN = getAToken(token);
 
-        tokenTVL[token] += amount;
-        UserInfo storage info = userInfo[msg.sender][token];
-        
-        info.amount += amount;
+        uint256 aTokenBalance = IERC20( A_TOKEN ).balanceOf(address(this));
+        uint256 totalShares_ = totalShare[token];
+        uint256 shares = (totalShares_ == 0) ? amount : (amount * totalShares_) / (aTokenBalance - amount);
 
-        updateUser(msg.sender, token);
+        totalShare[token] += shares;
+
+        UserInfo storage info = userInfo[token][msg.sender];
+        info.share  += shares;
 
         emit Stake(msg.sender, token, amount);
     }
 
-    /**
-     * @dev Allows a user to request a claim for a specified amount of a token.
-     * @param token The address of the token to claim.
-     * @param amount The amount of the token to claim.
-     */
-    function requestClaim(
-        address token, 
-        uint256 amount
-    ) external {
-        address agent = getAgent(msg.sender);
+     function withdraw(address token, uint256 shares) external {
 
-        uint256 requestId = IVault(agent).requestClaim_8135334(token, amount);
+        UserInfo storage info = userInfo[token][msg.sender];
+        require(info.share > 0 && info.share >= shares, "Invalid shares");
+
         updateUser(msg.sender, token);
+        uint256 totalShare_ = totalShare[token];
+        IERC20 A_TOKEN =  IERC20( getAToken(token));
+        // 1. 计算可提取的 aToken 数量
+        uint256 aTokenAmount = (shares * A_TOKEN.balanceOf(address(this))) / totalShare_;
 
-        UserInfo storage info = userInfo[msg.sender][token];        
-        info.amount -= amount;
+        // 2. 从 Aave V3 提取 USDT
+        POOL.withdraw(address(token), aTokenAmount, address(this));
+
+        // 3. 转账 USDT 给用户
+        uint256 tokenBalance = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransfer(msg.sender, tokenBalance);
+
+        // 4. 更新份额
+        info.share -= shares;
+        totalShare[token] -= shares;
 
 
-        emit RequestClaim(msg.sender, token, amount, requestId);
+        emit Withdraw(msg.sender, token, tokenBalance);
     }
 
-    function claim(
-        uint256 requestId
-    ) external {
-        address agent = getAgent(msg.sender);
-
-        ClaimItem memory claimItem = zeroVault.getClaimQueueInfo(requestId);
-
-        IVault(agent).claim_41202704(requestId);
-
-        tokenTVL[claimItem.token ] -= claimItem.principalAmount;
-        
-        emit ClaimAssets(msg.sender, claimItem.token, claimItem.totalAmount, requestId);
-    }
-
-    function getAgent(address user) internal returns (address) {
-        address agent = userAgent[user];
-        if(agent == address(0)) {
-            agent = createAgent(user);
+    function userScore(address user, address token) internal view returns (uint256) {
+        UserInfo storage info = userInfo[token][user];
+        if(info.lastUpdateBlock == 0) {
+            return 0;
         }
-        return agent;
+
+        uint256 adding =  info.share * (stableBlock() - info.lastUpdateBlock);
+        return info.totalScore + adding;
     }
 
-    // impl: StrategyZero.vol
-    function createAgent(address user) internal returns (address) {
-        BeaconProxy strategy = new BeaconProxy(address(this), 
-                abi.encodeWithSelector(
-                    bytes4(keccak256(bytes("initialize(address,address,address)"))),
-                     user, address(zeroVault), address(this))
-        );
+    // 获取当前总资产（USDT + 利息）
+    function totalAssets() public view returns (uint256) {
+        (uint256 totalCollateralBase,,,,,) = POOL.getUserAccountData(address(this));
+        // return POOL.getUserAccountData(address(this)).totalCollateralBase;
 
-        userAgent[user] = address(strategy);
-
-        return address(strategy);
+        return totalCollateralBase;
     }
 
-    function implementation() external view returns (address) {
-        return agentImpl;
+    function userTokenAssets(address token, address user) public view returns (uint256) {
+        UserInfo storage info = userInfo[token][user];
+        if (info.share == 0 ) {
+            return 0;
+        }
+
+        uint256 totalShare_ = totalShare[token];
+        IERC20 A_TOKEN =  IERC20( getAToken(token));
+
+        return (info.share * A_TOKEN.balanceOf(address(this))) / totalShare_;
     }
 
-
-    function getClaimableRewardsWithTargetTime(address _user, address _token, uint256 _targetTime) external view returns (uint256) {
-        return zeroVault.getClaimableRewardsWithTargetTime( userAgent[_user], _token, _targetTime);
-    }
-    function getClaimableAssets(address _user, address _token) external view returns (uint256) {
-        return zeroVault.getClaimableAssets( userAgent[_user], _token);
-    }
-    function getClaimableRewards(address _user, address _token) external view returns (uint256) {
-        return zeroVault.getClaimableRewards( userAgent[_user], _token);
-    }
-    function getTotalRewards(address _user, address _token) external view returns (uint256) {
-        return zeroVault.getTotalRewards( userAgent[_user], _token);
-    }
-    function getStakedAmount(address _user, address _token) external view returns (uint256) {
-        return zeroVault.getStakedAmount( userAgent[_user], _token);
-    }
-    function getContractBalance(address _token) external view returns (uint256) {
-        return zeroVault.getContractBalance(_token);
-    }
-    function getStakeHistory(address _user, address _token, uint256 _index) external view returns (StakeItem memory) {
-        return zeroVault.getStakeHistory( userAgent[_user], _token, _index);
-    }
-    function getClaimHistory(address _user, address _token, uint256 _index) external view returns (ClaimItem memory) {
-        return zeroVault.getClaimHistory( userAgent[_user], _token, _index);
-    }
-
-    function getStakeHistoryLength(address _user, address _token) external view returns(uint256) {
-        return zeroVault.getStakeHistoryLength( userAgent[_user], _token);
-    }
-
-    function getClaimHistoryLength(address _user, address _token) external view returns(uint256) {
-        return zeroVault.getClaimHistoryLength( userAgent[_user], _token);
-    }
-    function getCurrentRewardRate(address _token) external view returns(uint256, uint256) {
-        return zeroVault.getCurrentRewardRate(_token);
-    }
-    function getClaimQueueInfo(uint256 _index) external view returns(ClaimItem memory) {
-        return zeroVault.getClaimQueueInfo(_index);
-    }
-    function getClaimQueueIDs(address _user, address _token) external view returns(uint256[] memory) {
-        return zeroVault.getClaimQueueIDs( userAgent[_user], _token);
-    }
 
     function getTVL(address _token) external view returns(uint256) {
-        return tokenTVL[_token];
+        return IERC20( getAToken(_token) ).balanceOf(address(this));
     }
 
     function stableBlock() view public returns (uint256 ) {
-        return block.timestamp / 60;
+        return block.timestamp / 10;
     }
+    
+    function getAToken(address token) public view returns(address) {
+        return POOL.getReserveData(token).aTokenAddress;
+    }
+
+    function refoundMisToken(address token, address to, uint256 amount) external onlyOwner {
+        
+        if (token == address(0)) {
+            payable(to).transfer(amount);
+        } else {
+            IERC20(token).transfer(to, amount);
+        }
+    }
+
 }

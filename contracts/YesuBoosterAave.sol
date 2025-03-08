@@ -11,6 +11,10 @@ import "@aave/core-v3/contracts/interfaces/IPoolAddressesProvider.sol";
 
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
+/**
+ * @title YesuBoosterAave
+ * @dev A contract that allows users to stake tokens and earn rewards through Aave V3.
+ */
 contract YesuBoosterAave  is  OwnableUpgradeable {
 
     using SafeERC20 for IERC20;
@@ -35,6 +39,11 @@ contract YesuBoosterAave  is  OwnableUpgradeable {
     
     event Stake(address indexed _user, address indexed _token, uint256 indexed _amount);
     event Withdraw(address indexed _user, address indexed _token, uint256 indexed _amount);
+
+    /**
+     * @dev Initializes the contract with the given Aave Pool Addresses Provider.
+     * @param _addressesProvider The address of the Aave Pool Addresses Provider.
+     */
     function  initialize(address _addressesProvider) public initializer {
 
         __Ownable_init(msg.sender);
@@ -43,6 +52,10 @@ contract YesuBoosterAave  is  OwnableUpgradeable {
         POOL = IPool(ADDRESSES_PROVIDER.getPool());
     }
 
+    /**
+     * @dev Returns the address of the Aave Pool Addresses Provider.
+     * @return The address of the Aave Pool Addresses Provider.
+     */
     function getProvider() public view returns (address) {
         return address(ADDRESSES_PROVIDER);
     }
@@ -97,6 +110,11 @@ contract YesuBoosterAave  is  OwnableUpgradeable {
         emit Stake(msg.sender, token, amount);
     }
 
+    /**
+     * @dev Allows a user to withdraw a specified amount of shares.
+     * @param token The address of the token to withdraw.
+     * @param shares The amount of shares to withdraw.
+     */
      function withdraw(address token, uint256 shares) external {
 
         UserInfo storage info = userInfo[token][msg.sender];
@@ -105,17 +123,17 @@ contract YesuBoosterAave  is  OwnableUpgradeable {
         updateUser(msg.sender, token);
         uint256 totalShare_ = totalShare[token];
         IERC20 A_TOKEN =  IERC20( getAToken(token));
-        // 1. 计算可提取的 aToken 数量
+        // 1. withdraw aToken amount
         uint256 aTokenAmount = (shares * A_TOKEN.balanceOf(address(this))) / totalShare_;
 
-        // 2. 从 Aave V3 提取 USDT
+        // 2. withdraw Token from Aave V3 
         POOL.withdraw(address(token), aTokenAmount, address(this));
 
-        // 3. 转账 USDT 给用户
+        // 3. transfer Token to User 
         uint256 tokenBalance = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransfer(msg.sender, tokenBalance);
 
-        // 4. 更新份额
+        // 4. update shares
         info.share -= shares;
         totalShare[token] -= shares;
 
@@ -123,6 +141,12 @@ contract YesuBoosterAave  is  OwnableUpgradeable {
         emit Withdraw(msg.sender, token, tokenBalance);
     }
 
+    /**
+     * @dev Returns the user's score for a specific token.
+     * @param user The address of the user.
+     * @param token The address of the token.
+     * @return The user's score.
+     */
     function userScore(address user, address token) internal view returns (uint256) {
         UserInfo storage info = userInfo[token][user];
         if(info.lastUpdateBlock == 0) {
@@ -133,7 +157,10 @@ contract YesuBoosterAave  is  OwnableUpgradeable {
         return info.totalScore + adding;
     }
 
-    // 获取当前总资产（USDT + 利息）
+    /**
+     * @dev Returns the total assets (USDT + interest) held by the contract.
+     * @return The total assets held by the contract.
+     */
     function totalAssets() public view returns (uint256) {
         (uint256 totalCollateralBase,,,,,) = POOL.getUserAccountData(address(this));
         // return POOL.getUserAccountData(address(this)).totalCollateralBase;
@@ -141,6 +168,12 @@ contract YesuBoosterAave  is  OwnableUpgradeable {
         return totalCollateralBase;
     }
 
+    /**
+     * @dev Returns the user's token assets for a specific token.
+     * @param token The address of the token.
+     * @param user The address of the user.
+     * @return The user's token assets.
+     */
     function userTokenAssets(address token, address user) public view returns (uint256) {
         UserInfo storage info = userInfo[token][user];
         if (info.share == 0 ) {
@@ -153,19 +186,38 @@ contract YesuBoosterAave  is  OwnableUpgradeable {
         return (info.share * A_TOKEN.balanceOf(address(this))) / totalShare_;
     }
 
-
+    /**
+     * @dev Returns the total value locked (TVL) for a specific token.
+     * @param _token The address of the token.
+     * @return The total value locked for the token.
+     */
     function getTVL(address _token) external view returns(uint256) {
         return IERC20( getAToken(_token) ).balanceOf(address(this));
     }
 
+    /**
+     * @dev Returns the stable block number.
+     * @return The stable block number.
+     */
     function stableBlock() view public returns (uint256 ) {
         return block.timestamp / 10;
     }
     
+    /**
+     * @dev Returns the address of the aToken for a specific token.
+     * @param token The address of the token.
+     * @return The address of the aToken.
+     */
     function getAToken(address token) public view returns(address) {
         return POOL.getReserveData(token).aTokenAddress;
     }
 
+    /**
+     * @dev Allows the owner to refund mistakenly sent tokens.
+     * @param token The address of the token to refund.
+     * @param to The address to send the refunded tokens to.
+     * @param amount The amount of tokens to refund.
+     */
     function refoundMisToken(address token, address to, uint256 amount) external onlyOwner {
         
         if (token == address(0)) {

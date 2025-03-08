@@ -89,13 +89,13 @@ contract YesuBoosterAave  is  OwnableUpgradeable {
 
         updateUser(msg.sender, token);
 
-          // 2. 授权 Aave Pool 使用 USDT
+          // 2. approve Token to Aave Pool 
         IERC20(token).safeIncreaseAllowance(address(POOL), amount);
 
-        // 3. 存入 Aave V3，并获取 aToken
+        // 3. stake Token to Aave V3 and get Atoken
         POOL.supply(address(token), amount, address(this), 0);
 
-        // 4. 按比例更新用户份额（简化逻辑，实际需计算 aToken 数量）
+        // 4. calc user shares 
         address A_TOKEN = getAToken(token);
 
         uint256 aTokenBalance = IERC20( A_TOKEN ).balanceOf(address(this));
